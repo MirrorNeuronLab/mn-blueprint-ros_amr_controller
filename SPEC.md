@@ -1,157 +1,85 @@
-# OtterDesk Blueprint Catalog Specification
+# Specification
 
-## Purpose
+- The executable authority is `type: service` with one root
+  `MirrorNeuron.Runner.DockerCompose` worker.
+- The full TurtleBot Compose source is a blueprint payload at
+  `payloads/docker_compose/turtlebot-maze`; large contexts are staged through
+  shared storage with a verified digest before Spark builds them.
+- Placement is capability based: one NVIDIA CUDA GPU and native capability
+  `docker_compose_prepare_v1` are required, with no node name embedded in the
+  scheduling constraints.
+- The native host owns one exclusive Docker Compose project for this service.
+  Starting a new service run first tears down the previous project, including
+  its orphans and volumes, then starts the new project. It does not use or
+  modify the MirrorNeuron runtime Compose environment or DockerWorker
+  generated worker Compose file.
+- The root project starts the warehouse simulation, video server/UI, rosbridge,
+  control relay, navigation gateway, and bounded MCP service. Readiness requires
+  all services running plus dashboard, MCP, video, and rosbridge checks.
+- GUI mounts are opt-in. Spark runs with the headless settings in
+  `mirrorneuron/warehouse.env`; local GUI development can provide explicit
+  `TURTLEBOT_X11_SOCKET` and `TURTLEBOT_XAUTHORITY` values.
+- The Web UI is the existing TurtleBot dashboard on port 8088. When it is
+  opened through MirrorNeuron, its video stream (8080) and rosbridge (9090)
+  use the authenticated local job UI proxy instead of exposing the Spark host
+  to the browser. The MCP service advertises Streamable HTTP at `/mcp` on port
+  8090 and is not part of that UI proxy allowlist.
+- The response-agent declaration is the single control contract. User tools
+  are exactly `get_robot_status`, `navigate_to_zone`, `cancel_navigation`, and
+  `adjust_robot`; the internal operation tool is exactly
+  `get_navigation_operation`. Navigation accepts only zones A/B/C, and manual
+  adjustments are short pulses routed through a dead-man relay.
+- The bounded response agent is Job-scoped and starts with the stable response
+  service. It is not a DAG node and does not start, resume, or replace the
+  run-scoped Compose service. Effects require one passing MCP service whose
+  name, path, tags, registry, and argument schemas match the manifest exactly.
+- Each initial agent turn uses the shared SDK structured planner with the resolved
+  `default` model (`openai_compatible`, `api_base: auto`). Invalid output or model failure causes no motion. One turn
+  can produce at most one control effect or one explicit memory mutation. RAG
+  retrieval is capped at two compact chunks and 1,000 characters so the plan,
+  Job context, and bounded answer remain inside the model context window.
+- Job/Run status is a timestamped structured context plane, never vector-indexed
+  knowledge. Conversation may use a clearly marked last-known-good snapshot for
+  up to 30 seconds, but every non-emergency motion calls `get_robot_status`
+  live and requires `connected: true` before the motion tool is invoked.
+- Typed chat requests are interpreted semantically through declared MCP tool
+  descriptions: “move to zone A” selects `navigate_to_zone(zone_a)` and “stop”
+  selects `cancel_navigation()`. B/C and polite paraphrases are supported.
+- Cancellation has effect `stop`, distinct from `motion`, and skips the live
+  motion preflight. It still uses the shared planner and MCP service validation.
+  It cancels robot movement while leaving the simulation service running.
+- `navigate_to_zone` returns an operation UUID. The navigation gateway accepts
+  both correlated JSON commands and the dashboard's existing string commands;
+  correlated progress is published separately without breaking dashboard
+  status. `get_job_turn` polls the observed operation at one-second intervals
+  for no more than 180 seconds.
+- Job knowledge and RAG resources are durable across ROS Run restarts. Explicit
+  memory supports only Zone A/B/C aliases, capability notes, and constraints
+  that disable existing controls. It cannot add coordinates, tools, speed,
+  duration, or relaxed safety.
+- Durable RAG contains only capabilities, zone semantics, safety rules, and
+  human-learned knowledge. Operational pose, Run state, navigation progress,
+  and service health remain in the freshness-marked live context plane.
+- A direct human prohibition such as “Do not enter Zone C” is an explicit,
+  argument-scoped control constraint. It blocks only navigation to Zone C,
+  returns the applied rule identity with the command receipt, and links to the
+  authoritative Job file at `knowledge/learned/active.md`.
+- Robot tools return bounded confirmation metadata. The Job response preserves
+  command state, target, validated arguments, applied rules, and learned-memory
+  receipts so clients do not infer control or safety outcomes from prose.
+- Pause, cancel, retry failure, and stop clean up only the owned Compose project;
+  resume starts it again from the same staged source and project identity.
+- Stable job data, definition identity, and schedules remain independent from
+  run-scoped service history.
 
-`otterdesk-blueprints` is the self-contained product blueprint catalog consumed
-by OtterDesk and MirrorNeuron tooling. Each catalog entry combines a source
-manifest, launch configuration, domain payload, user documentation, safety
-terms, and deterministic tests into an installable co-worker/workflow bundle.
+## Blueprint package format
 
-This specification applies only to this repository. Reusable agents, skills,
-SDK compilation, and Core delivery are dependencies, not code owned here.
-
-VC Assistant, Financial Advisor, Legal Assistant, and Research Assistant
-use foundational `mn_sdk.llm` access through blueprint support and do not
-declare `mirrorneuron-litellm-communicate-skill`. Their RAG packages and OCR skills own
-complete model specifications and pass them to the SDK's lazy runtime wrapper.
-Blueprints declare skills, SDK packages, and product-level behavior; first-use runtime
-selection chooses and prepares the concrete DMR model.
-
-## Catalog Contract
-
-Root `index.json` is an ordered inventory of published package paths.
-`category.json` defines shared categorization. All descriptive and executable
-information comes from each package, including its semantic release version.
-A package omitted from the inventory remains unpublished.
-
-Every package uses the same canonical blueprint/v1 manifest in development,
-installed folders, generated folders, and ZIP distributions. `manifest.json`
-owns identity and role-document references. `workflow.json` owns logical
-steps and policies; `execution.json` owns worker bindings, resources, services,
-and schedules; `contracts.json` owns inputs, outputs, artifacts, and validation.
-Platform features use registered, versioned files under `extensions/`.
-`config/default.json` owns operator tunables; `config/overwrite.json` contains
-optional local overrides. Package dependencies are declared in `dependencies.json`.
-
-Every published package enables the `mn.response` extension. Core owns this
-bounded service outside the workflow DAG. Its descriptor may also declare a
-bounded MCP agent. Runtime-affecting extensions require a supported SDK handler.
-Catalog listing reads and validates documents without Python imports or resource
-preparation. Python step modules load only during explicit compilation.
-
-The response service is not a workflow node, port, command, or run-scoped
-worker. Blueprint response context must exclude credentials, private source
-documents, unrestricted artifacts, and other confidential run data.
-
-## Blueprint Ownership
-
-A blueprint owns product/domain composition:
-
-- the mission, user inputs, domain assumptions, safety limits, and outputs;
-- logical step contracts and direct `needs` dependencies;
-- specialist registry bindings and internal collaboration definitions;
-- domain prompts, formulas, evidence/review policy, and report semantics; and
-- deterministic artifact naming and customer-facing documentation.
-
-It does not own generic message delivery, ACK/retry/dead-letter behavior,
-source/sink/join controls, manifest compilation, reusable tool mechanics, or
-shared agent lifecycle composition.
-
-## Runtime Layout
-
-- `payloads/domain/` is the single domain package and is split into focused
-  responsibility-named modules.
-- `payloads/steps/` defines logical step I/O mappings and internal `StepSpec`
-  collaboration only; it contains no domain processing.
-- `payloads/agents/` exposes bounded specialist handlers with discoverable
-  registry mappings.
-- `payloads/runtime/` is limited to config/context/service preparation,
-  lifecycle/observability, persistence, finalization, and failure handling.
-- Docker, host, OpenShell, or Beam payload assets stay in explicit sibling
-  payload directories.
-
-Core expands logical steps to generated boundary controls. Domain agents never
-complete logical steps, implement physical routes, or traverse workflow
-dependencies.
-
-## Data and Artifact Contract
-
-Live coordination messages contain bounded data and artifact references. Large,
-sensitive, or authoritative results are durably written before a handler
-returns. Duplicate delivery is safe through invocation idempotency and
-deterministic artifact paths.
-
-Bundle-local config paths use SDK `@/` references and are resolved by the shared
-staging/runtime contract. Blueprint code consumes resolved paths and does not
-implement alternate path syntax.
-
-Persistent cross-run state is explicit in `metadata.job_data.resources`.
-Resources declare a logical name, validated relative job-data path,
-`read_only`/`read_write` access, and optional bundle-local `@/` directory seed.
-The stable `job_id`, not blueprint ID or `run_id`, is the storage isolation
-key. Seeds apply only on initialization and explicit data reset. Knowledge,
-Milvus Lite databases, and durable application state remain job-scoped; run
-inputs, outputs, logs, and ordinary artifacts remain run-scoped.
-
-Root `knowledge/` is the shared reference-document convention for every blueprint.
-The runtime compiler declares its isolated knowledge and RAG resources, stages the
-seed through standard payload transport, and enables retrieval unless explicitly
-disabled. Response questions about capabilities, findings, and explanations retrieve
-these documents alongside current evidence. Reference documents do not authorize
-actions or establish live findings; fictional examples are labeled synthetic.
-
-Blueprints must not derive host storage paths, treat replication as a
-transactional filesystem, or clear job data during run cleanup. Mutable
-file-backed resources require Core owner-node placement and the declared access
-mode. Two jobs using one blueprint must remain mutually isolated.
-
-## Documentation and Safety
-
-Each blueprint README explains setup, smallest safe run, inputs/outputs, and
-inspection. Its SPEC states current outcomes, evaluation criteria, contracts,
-limits, risks, and non-goals. TERM records domain/legal assumptions where used.
-These documents, manifest, config, payload behavior, catalog metadata, and tests
-must agree.
-
-Blueprints never commit customer data or secrets. External network, camera,
-voice, email, filesystem, model, GPU, and sandbox capabilities are explicit in
-requirements and user documentation. Review-only outputs are not presented as
-professional, legal, medical, financial, scientific, or security guarantees.
-
-## Versioning
-
-Changes to required inputs, topology, outputs/artifacts, default domain policy,
-side effects, safety boundaries, dependencies, or evaluation semantics require
-a blueprint version/compatibility review and synchronized catalog metadata.
-Additive optional config is compatible only when omission preserves behavior.
-
-## Acceptance
-
-The default suite validates catalog/index consistency, source manifests,
-registry handlers, package dependencies, runtime/step/domain boundaries,
-artifacts, documentation, and blueprint-specific deterministic behavior:
-
-```bash
-python -m pytest tests -q
-```
-
-Live external capabilities remain explicit opt-in checks. Contract changes in a
-sibling SDK/agent/skill/Core layer are tested in that owning repository as well
-as through the affected catalog integration.
-
-SDK workflow capabilities are declared in the `packages` array in
-`dependencies.json`; domain skills remain in `skills` and agents in `agents`.
-Every package and skill declaration uses `type: "pip"`, `source: "gar"`, its full
-Python distribution name, and the PEP 440 release range `>=1.3.47`. For example:
-
-```json
-{"type": "pip", "source": "gar", "name": "mn-python-sdk-rag", "version": ">=1.3.47", "extras": ["milvus"]}
-```
-
-Local installation resolves SDK packages from `mn-python-sdk/packages` and skills
-from `mn-skills` or this blueprint's `payloads/skills` projects by distribution
-name, ignoring the declared release version. Local setup enables
-`MN_USE_LOCAL_SKILLS=1`. Binary mode retains GAR version constraints and does not select bundled
-skill source automatically. The same declaration works in both modes; source
-paths are prepared by the SDK rather than authored in dependency records.
-Each blueprint activates only its declared SDK capability closure.
+This blueprint uses the canonical blueprint/v1 format in both folders and ZIPs.
+`manifest.json` contains identity, semantic release version, and document references.
+`workflow.json` owns logical topology and policies; `execution.json` owns workers,
+resources, and services; `contracts.json` owns input/output and artifact contracts.
+Platform descriptors live in `extensions/`, package requirements in
+`dependencies.json` when present, and operator defaults in `config/default.json`.
+The SDK reads these documents together and compiles the Core execution artifact.
+A ZIP contains the same files as the folder. Local overrides and invocation
+configuration are resolved by the SDK before launch.

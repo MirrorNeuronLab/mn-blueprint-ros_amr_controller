@@ -1,183 +1,112 @@
-# OtterDesk Blueprints
+# ROS AMR Controller
 
-`otterdesk-blueprints` is a self-contained OtterDesk-facing worker blueprint catalog. Each blueprint folder includes
-its own manifest, configuration, payloads, README, and user-facing `SPEC.md`.
+This long-lived service runs the ROS 2 Jazzy TurtleBot warehouse simulation as
+an isolated Docker Compose project on the selected CUDA/NVIDIA runtime node.
+The blueprint source includes the complete Compose context at
+`payloads/docker_compose/turtlebot-maze`; it does not require a prebuilt image
+or a checkout at `/home/homer/Sandbox`.
 
-VC Assistant, Financial Advisor, Legal Assistant, and Research Assistant
-use foundational `mn_sdk.llm` calls through blueprint support; they do not
-depend on the deprecated LiteLLM communication skill. Their RAG packages and OCR skills
-own model specifications and use the SDK runtime model wrapper, while each
-blueprint declares only its product-level behavior and required skills and SDK packages.
+The control plane stages the large source tree through shared storage, then
+Spark's native SDK builds and starts a project named for the service run. This
+is separate from MirrorNeuron's own runtime Compose file and from
+DockerWorker's generated `docker-compose.workers.yml`.
 
-## Quick Start
-
-List available blueprints:
-
-```bash
-mn blueprint list
-```
-
-Run a catalog blueprint:
+Run from the control PC:
 
 ```bash
-mn blueprint run <blueprint_id>
+mn blueprint validate /Users/homer/Projects/otterdesk-blueprints/ros_amr_controller
+mn blueprint run /Users/homer/Projects/otterdesk-blueprints/ros_amr_controller --web-ui --detached
 ```
 
-Run a checked-in folder directly:
+The service uses the exclusive Compose project name
+`mn-compose-ros-amr-controller` on the selected runtime node. A new launch
+clears that previous project before starting, preventing stale services from
+holding the dashboard, video, rosbridge, or MCP ports.
+
+The selected Spark node hosts the dashboard on `8088`, the bounded MCP endpoint
+on `8090`, video on `8080`, and rosbridge on `9090`. With `--web-ui`, open the
+local MirrorNeuron URL printed by the CLI (`/jobs/<job_id>/ui`): it proxies the
+dashboard, video streams, and rosbridge through the local Web UI service rather
+than navigating the browser directly to Spark. Startup requires all seven
+declared Compose services plus the dashboard, MCP health endpoint, video TCP
+port, and rosbridge TCP port.
+
+Pausing or stopping the service runs Compose `down --remove-orphans --volumes`
+only for this service project. Resuming recreates that same owned project from
+the staged, digest-verified source. Other Docker projects and runtime services
+on Spark are not touched.
+
+For manual headless Compose development, run from the bundled source:
 
 ```bash
-cd <blueprint_id>
-mn blueprint run --folder .
+cd /Users/homer/Projects/otterdesk-blueprints/ros_amr_controller/payloads/docker_compose/turtlebot-maze
+docker compose --env-file mirrorneuron/warehouse.env up --build demo-world-warehouse
 ```
 
-Run repository tests:
+The desktop catalog reads this folder through the root `index.json`. To use
+this local checkout in desktop development, set `MN_BLUEPRINT_SOURCE=local`
+and `MN_BLUEPRINT_LOCAL=/Users/homer/Projects/otterdesk-blueprints`.
 
-```bash
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -r requirements-test.txt
-.venv/bin/python -m pytest -q
-```
+The published robot controls remain intentionally narrow: inspect status,
+navigate only to zones A/B/C, cancel, or make a short watchdog-limited manual
+adjustment. Arbitrary ROS topics, shell commands, poses, and unbounded velocity
+commands are not exposed.
 
-See [Runtime DAG Flow Patterns](DAG_FLOW_PATTERNS.md) for the catalog's
-event-driven, fork/join, service, and linear flow contracts.
+The stable Job also owns a bounded conversational response agent. OtterDesk
+chat calls the Job's `ask_job` MCP tool directly; it does not run a desktop
+keyword parser or call the robot MCP endpoint. The agent uses MirrorNeuron's
+resolved `default` model for a validated JSON plan per turn, discovers only the
+healthy MCP service registered by the already-running ROS service Run, and
+checks its exact tool schemas before issuing at most one declared effect. It
+never starts or resumes the ROS Run.
 
-## Persistent co-worker conversation
+## Type commands in chat
 
-Every published blueprint declares the stable Job response service. After
-hiring, OtterDesk can ask bounded questions about the co-worker's role, safe
-configuration, schedule, and latest work when it has never run, is idle,
-paused, scheduled, completed, failed, or archived. Sending a question never
-starts the target co-worker.
+Start the simulation, wait for its services to become healthy, then open this
+co-worker's OtterDesk chat and type, for example:
 
-Core owns this response service outside the workflow DAG. It uses sanitized Job
-context and Job-scoped knowledge, never a blueprint-defined service node or
-command, and excludes credentials, private source data, and unrestricted
-artifacts from its responses.
+- `move to zone A` — request navigation to Zone A (also supports B and C).
+- `stop` — cancel navigation and send a stop burst, keeping the simulation open.
+- `what is the robot's status?` — read status without changing motion.
+- `turn left` — request one short left adjustment.
 
-The catalog contract tests also expect this repository to live beside the companion
-`mn-skills` and `mn-agents` folders because they import shared blueprint support
-helpers and render shared agent templates.
+The current Job response SDK interprets these requests using the declared tool
+descriptions and the resolved `default` model through `openai_compatible` with
+`api_base: auto`. No separate chat server or desktop command parser is needed.
+The blueprint declares the SDK job-response, MCP, RAG, and Web UI packages.
 
-## Catalog
+Before navigation or adjustment, the agent reads `get_robot_status` live and
+requires `connected: true`. The `stop` effect skips that motion preflight, but
+still requires a reachable registered MCP service and a valid model plan.
+It does not bypass the planner or stop the co-worker's Compose service.
+Use OtterDesk's pause/stop service control to shut down the simulation.
 
-| Blueprint | Category | Purpose |
-| --- | --- | --- |
-| [`gtm_assistant`](gtm_assistant/README.md) | Business | Turns de-identified customer feedback into activation, retention, product, and lifecycle decisions. |
-| [`drug_discovery_research_assistant`](drug_discovery_research_assistant/README.md) | Science | Runs one discovery cycle, evaluates five distinct molecules, writes a review packet to ~/Downloads/{job_name}, and completes. |
-| [`research_assistant`](research_assistant/README.md) | Science | A research assistant that combines deterministic evidence and verification stages with an isolated OpenShell worker for autonomous goal refinement, tool-driven exploration, hypothesis generation, and bounded generated-code experiments. |
-| [`software_architecture_advisor`](software_architecture_advisor/README.md) | Engineering | A read-only architecture advisor for local folders or public GitHub repositories, with dynamically planned child workflows, cited evidence, independent review and a prioritized roadmap. |
-| [`purchasing_manager`](purchasing_manager/README.md) | Finance | A source-grounded purchasing co-worker for heavy-asset decisions. It screens real market options, models landed cost, discounted and risk-adjusted TCO, EAC, unit economics, scenarios, and cash/finance/lease terms, then prepares an approval-ready packet without transacting. |
-| [`cctv_operator`](cctv_operator/README.md) | Security | A steerable NVIDIA CCTV co-worker with a self-contained Docker demo stream, CUDA-assisted MJPEG preview, live operator event feed, sparse baseline analysis, event-triggered frame bursts, and durable reviewed-frame artifacts. |
-| [`microduck_controller`](microduck_controller/README.md) | Robotics | Lets an OtterDesk user control the live Microduck MuJoCo simulation in ordinary language through bounded MCP actions, deterministic ball navigation, and stoppable continuous free play. |
-| [`litigation_analyst`](litigation_analyst/README.md) | Legal | Investigates legal-document folders with exact citations, bounded hypotheses, graph tools, and a draft audit trail. Defaults to public EMC2 sample data on Docker workers. |
-| [`legal_assistant`](legal_assistant/README.md) | Legal | A review-only legal document co-worker for invoice, bill, and contract review. Put invoices, bills, contracts, clause notes, labels, or supporting files in the input folder; it extracts payable fields, maps contract clauses, compares playbook expectations, flags review issues, and writes a source-grounded review packet to the output folder. |
+Navigation replies are correlated. Chat receives an immediate accepted reply
+with a turn to poll; the Job agent then reads `get_navigation_operation` once
+per second for up to 180 seconds and reports only observed progress and a
+terminal arrival, failure, cancellation, supersession, or timeout.
 
-## Folder Contract
+Learning is explicit and Job-scoped. “Remember”, “learn”, correction, and
+“forget” requests may store aliases to Zone A/B/C, restrictive constraints
+that disable an existing control, or descriptive capability notes. Normal chat
+is not learned. Active records live under Job `knowledge/learned/`, their
+history and tombstones remain in Job SQLite, and the Job RAG index is refreshed
+after each committed change. See [SAFETY.md](SAFETY.md).
 
-Most blueprint folders contain:
+Direct restrictive instructions beginning with “do not”, “don’t”, or “never”
+are also explicit learning. For example, “Do not enter Zone C” stores an
+argument-scoped rule that blocks `navigate_to_zone(zone_c)` without disabling
+Zones A or B. Command and learning replies include structured receipts and the
+Job-relative link `knowledge/learned/active.md` for the saved knowledge.
 
-| Path | Purpose |
-| --- | --- |
-| `README.md` | Self-contained quickstart, inspection notes, and validation guidance. |
-| `SPEC.md` | User-facing problem, outcome, evaluation criteria, limits, and upgrade path. |
-| `TERM.md` | Terms, assumptions, or domain notes when present. |
-| `manifest.json` | Canonical blueprint/v1 identity, semantic release version, and role-document references. |
-| `workflow.json` | Logical topology and workflow policies. |
-| `execution.json` | Agents, workers, runtime requirements, services, and schedules. |
-| `contracts.json` | Inputs, outputs, artifacts, validation, status, and privacy. |
-| `extensions/` | Versioned platform and product descriptors. |
-| `config/default.json` | Default launch configuration and mock/sample inputs. |
-| `config/overwrite.json` | Optional local overrides. Do not commit customer secrets. |
-| `knowledge/` | Optional reference documents, seeded and indexed by the runtime for conversation RAG. |
-| `payloads/` | Worker code, prompts, policies, fixtures, and support files. |
+## Blueprint package format
 
-Blueprints that retain knowledge, RAG, or application state across executions
-declare `resources` in `extensions/storage.json` through `mn.storage`. Core creates one
-stable job-data directory per hired/configured job:
-
-```text
-$MN_HOME/job-data/<job-id>/
-  knowledge/
-  databases/rag/
-  state/
-```
-
-The bundle's knowledge seed is copied only when the stable job is initialized
-or explicitly reset. Later runs share that directory and never overwrite user
-edits. Run inputs, outputs, logs, and artifacts remain run-scoped. Two jobs
-created from the same blueprint receive different job-data directories and RAG
-databases.
-
-The standard payload layout is consistent across the catalog: `runtime/` contains
-the blueprint context adapter, `steps/` contains manifest-facing handlers, and
-`agents/` contains domain workers or services. Docker, native-host, OpenShell,
-and Beam worker assets stay as sibling payload directories (`docker_worker/`,
-`openshell_worker/`, or `beam_modules/`) rather than nested under a script
-wrapper. Python workflow steps are launched with the shared SDK module
-`python3 -m mn_sdk.step_runtime`.
-
-Python handler steps use module-only references such as `steps.research`; the
-shared `mn_sdk.step_runtime` entrypoint calls that module's `run()` function.
-Keep DAG topology in `workflow.json` rather than duplicating it in blueprint-local
-dispatch code or configuration handoff lists.
-
-## Safety Checklist
-
-- Review `manifest.json`, `payloads/`, and `pass_env` before live runs.
-- Start with mock, dry-run, or quick-test settings before enabling real external services.
-- Keep customer-specific inputs and secrets in local overrides or environment variables.
-- Update the local blueprint README and `SPEC.md` when behavior, inputs, outputs, or limits change.
-- Declare durable resources by logical name, validated relative path, access
-  mode, and optional `@/` bundle seed. Never declare or accept a host path.
-
-## Canonical packages
-
-`index.json` is an ordered list of published package paths. Names, descriptions,
-versions, requirements, and product information come from each package's documents.
-Catalog reads validate data without importing Python code or preparing resources.
-All folders and ZIPs use `https://mirrorneuron.io/schemas/blueprint/v1/manifest.schema.json`.
-Use `mn_sdk.blueprints.read_blueprint`, `resolve_config`, and `compile_blueprint`;
-`open_blueprint` adds ZIP extraction and `export_blueprint` preserves the full package.
-External dependencies remain declared; offline vendoring is optional.
-
-The `software_architecture_advisor` blueprint accepts a public HTTPS GitHub repository URL or local source folder and uses the shared graph-analysis skill in Docker workers. See [Architecture Advisor](software_architecture_advisor/README.md).
-
-SDK workflow capabilities are declared in the `packages` array in
-`dependencies.json`; domain skills remain in `skills` and agents in `agents`.
-Every package and skill declaration uses `type: "pip"`, `source: "gar"`, its full
-Python distribution name, and a pinned release version. For example:
-
-```json
-{"type": "pip", "source": "gar", "name": "mn-python-sdk-rag", "version": "0.1.0", "extras": ["milvus"]}
-```
-
-Local installation resolves SDK packages from `mn-python-sdk/packages` and skills
-from `mn-skills` or this blueprint's `payloads/skills` projects by distribution
-name, ignoring the declared release version. Local setup enables
-`MN_USE_LOCAL_SKILLS=1`. Binary mode retains GAR pins and does not select bundled
-skill source automatically. The same declaration works in both modes; source
-paths are prepared by the SDK rather than authored in dependency records.
-Each blueprint activates only its declared SDK capability closure.
-
-## Shared conversation knowledge
-
-Every blueprint may include a root `knowledge/` directory of reference documents.
-The SDK stages it as a Core-owned seed for the isolated Job `knowledge/` resource
-and enables RAG by default when documents are present. An explicit `mn.rag.enabled:
-false` opts out of retrieval. Existing explicit knowledge seeds must be migrated
-rather than combined silently with a second root seed.
-
-The response service prepares the index and retrieves relevant knowledge for
-capability, findings, and explanation questions, alongside current Job evidence.
-Documents are reference data, not executable instructions or live observations.
-Mark fictional fixtures as synthetic in each document. Actual findings come from
-current evidence or declared read tools. Adding a seed does not overwrite an
-existing Job's documents; existing Jobs need an explicit knowledge import or update.
-
-## Dependency ranges
-
-MirrorNeuron Python dependencies in `dependencies.json`, execution configuration,
-and worker requirements use `>=1.3.47`. Bundled demo distributions are versioned
-`1.3.47` and their declarations use the same minimum. Third-party libraries retain
-their own version families (for example `numpy>=2.3.5,<3.0`). Package identity
-versions and container image digests remain concrete artifact identities.
+This blueprint uses the canonical blueprint/v1 format in both folders and ZIPs.
+`manifest.json` contains identity, semantic release version, and document references.
+`workflow.json` owns logical topology and policies; `execution.json` owns workers,
+resources, and services; `contracts.json` owns input/output and artifact contracts.
+Platform descriptors live in `extensions/`, package requirements in
+`dependencies.json` when present, and operator defaults in `config/default.json`.
+The SDK reads these documents together and compiles the Core execution artifact.
+A ZIP contains the same files as the folder. Local overrides and invocation
+configuration are resolved by the SDK before launch.
