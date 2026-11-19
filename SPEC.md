@@ -79,6 +79,8 @@
 - Stable job data, definition identity, and schedules remain independent from
   run-scoped service history.
 
+After shutdown, open `report.html` in the run outputs to see the service, workflow step and recorded outcome from `final_artifact.json`. The live monitor shows the last received simulation report. Route completion requires separate navigation evidence.
+
 ## Block composition (3.0.0)
 
 Core’s DockerCompose runner continues to own exclusive project startup, readiness and teardown. The terminal worker now uses a stock domain-operation block, with `domain/finalization.py` committing the declared service artifact before returning its reference. The shell finalizer is removed. No Python wrapper launches Compose, no robot command runs during finalization, and GPU/network/control constraints remain intact.

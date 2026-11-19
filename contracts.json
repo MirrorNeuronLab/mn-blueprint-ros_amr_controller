@@ -12,6 +12,17 @@
     "profile": "standard_run_store",
     "artifacts": [
       {
+        "artifact_id": "review",
+        "path": "report.html",
+        "mime_type": "text/html",
+        "type": "domain_report",
+        "required": false,
+        "source_refs": [
+          "final_artifact.json"
+        ],
+        "producer": "finalize"
+      },
+      {
         "artifact_id": "events_jsonl",
         "path": "events.jsonl"
       }

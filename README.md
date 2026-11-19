@@ -70,6 +70,8 @@ healthy MCP service registered by the already-running ROS service Run, and
 checks its exact tool schemas before issuing at most one declared effect. It
 never starts or resumes the ROS Run.
 
+After shutdown, open `report.html` in the run outputs to see the service, workflow step and recorded outcome from `final_artifact.json`. The live monitor shows the last received simulation report. Route completion requires separate navigation evidence.
+
 ## Type commands in chat
 
 Start the simulation, wait for its services to become healthy, then open this

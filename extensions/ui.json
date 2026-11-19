@@ -11,12 +11,12 @@
   ],
   "setup_guide": {
     "schema": "otterdesk.setup_guide.v1",
-    "introduction": "I'll guide the simulated warehouse robot between approved Zones A, B and C and report observed progress. Start the included warehouse simulation on a compatible NVIDIA node, then ask for its status. You can request a move or Stop once ready; this controls a simulation only.",
+    "introduction": "Start the included warehouse simulation to see where the robot is before asking it to move. You can inspect its status and approved zones without connecting a physical robot.",
     "sample": {
       "available": true,
       "title": "Warehouse robot simulation",
-      "description": "Start the included TurtleBot warehouse world with its default headless settings. A compatible NVIDIA Docker Compose node is required.",
-      "expected_output": "Once the warehouse simulation is ready, a live dashboard and Chat controls for Zones A, B and C, current status and Stop.",
+      "description": "Start the included warehouse on a compatible NVIDIA computer.",
+      "expected_output": "A live monitor showing the simulated robot’s position and Chat access to its status.",
       "values": {
         "inputs.payload.scenario": "warehouse"
       }
@@ -39,7 +39,11 @@
         ]
       }
     ],
-    "prompt_file": "@/payloads/prompts/setup.md"
+    "prompt_file": "@/payloads/prompts/setup.md",
+    "run_guidance": {
+      "on_start": "I’ll bring up the simulated warehouse and check its services before navigation is available.",
+      "web_ui_ready": "Open the warehouse monitor to check the robot’s position. You can ask for its current status in Chat."
+    }
   },
   "web_ui": {
     "enabled": true,

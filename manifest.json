@@ -4,7 +4,7 @@
   "name": "ROS AMR Controller",
   "tagline": "Guide a simulated warehouse robot through Chat",
   "payload_api": "mn.blueprint.v1",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Practice operating a warehouse robot in a simulation using everyday chat. Send it to designated areas, watch its progress through live video, and stop movement when you need to.",
   "workflow": "workflow.json",
   "execution": "execution.json",

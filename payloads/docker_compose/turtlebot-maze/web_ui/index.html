@@ -281,6 +281,7 @@
       <div class="control-layout">
         <section>
         <h3 class="control-heading">Autonomous destinations</h3>
+        <p id="navigation-evidence">Waiting for navigation telemetry from the simulation.</p>
         <div class="drive-controls route-controls">
           <button class="drive-button route-button ros-control" data-route="zone_a" type="button" disabled>
             Move to A zone
@@ -767,6 +768,8 @@
             const message = JSON.parse(event.data);
             if (message.op === "publish" && message.topic === navigationStatusTopic) {
               setNavigationStatus(describeNavigationStatus(message.msg.data), true);
+              document.getElementById("navigation-evidence").textContent =
+                `Last simulation report: ${describeNavigationStatus(message.msg.data)}. Received ${new Date().toISOString()} from ${navigationStatusTopic}.`;
             }
             if (message.op === "publish" && message.topic === mapTopic) {
               drawMap(message.msg);
